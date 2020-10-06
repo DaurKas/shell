@@ -1,4 +1,4 @@
-#Shell
+
 ## What is it <a name="introduction"></a>
 The shell is a command language interpreter.
 ## What can it do now <a name="paragraph1"></a>
