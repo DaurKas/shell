@@ -7,3 +7,6 @@ Programm can execute a different commands, it is also supports input/ouptut in/f
 1) Download
 2) run "make all"
 3) run "/bin/main"
+4) entertain yourself
+5) ???
+6) enter "quit" to quit
