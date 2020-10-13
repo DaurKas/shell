@@ -16,6 +16,12 @@ int strcmp(char *str1, char *str2) {  //  0 - eq, 1 - s1 < s2, 2 - s1 > s2
     } while (str1[i] && str2[i]);
     return 0;
 }
+pid_t *add_pid(pid_t *pids, pid_t pid, int *bg_size) {
+    pids = realloc(pids, (*bg_size + 1) * sizeof(pid_t));
+    pids[*bg_size] = pid;
+    (*bg_size)++;
+    return pids;
+}
 char *get_word(char *last_ch) {
     char ch, *word = NULL;
     ch = getchar();
@@ -59,7 +65,7 @@ void free_list(char **list) {
     free(list);
     return;
 }
-char ***cmd_cutter(char **cmd, int *number) {
+char ***cmd_cutter(char **cmd, int *number, char *sep_word) {
     int cnt = 1, w_cnt = 0, newsize = 0;
     char ***cmd_arr = malloc(sizeof(char**));
     cmd_arr[0] = NULL;
@@ -68,7 +74,7 @@ char ***cmd_cutter(char **cmd, int *number) {
         return NULL;
     }
     for (int i = 0; cmd[i] != NULL; i++) {
-        if (cmd[i][0] != '|') {
+        if (strcmp(cmd[i], sep_word) != 0) {
             newsize = (w_cnt + 1) * sizeof(char*);
             cmd_arr[cnt - 1] = realloc(cmd_arr[cnt - 1], newsize);
             cmd_arr[cnt - 1][w_cnt] = cmd[i];
@@ -88,6 +94,15 @@ char ***cmd_cutter(char **cmd, int *number) {
     cmd_arr[cnt - 1][w_cnt] = NULL;
     *number = cnt;
     return cmd_arr;
+}
+int word_search(char **cmd, char* word) {
+    int pos = 0;
+    for (pos = 0; cmd[pos] != NULL; pos++) {
+        if (!strcmp(word, cmd[pos])) {
+            return pos;
+        }
+    }
+    return -1;
 }
 int iodetector(char **cmd, int *ioflag, int *ind) {
 //  ioflag = 0 <=> in from file, = 1 <=> out in file, = 2 <=> no redirect
@@ -125,20 +140,44 @@ int execute(char **cmd) {
     }
     if (execvp(cmd[0], cmd) < 0) {
         perror("exec failed\n");
+        close(fd);
         return 1;
     }
     close(fd);
     return 0;
 }
-int main_cmd_exec(char **cmd) {
-    int cmd_num = 0, next_fd[2] = {0, 1}, prev_fd[2] = {0, 1};
-    char ***cmd_arr = cmd_cutter(cmd, &cmd_num);
+int change_dir(char **cmd) {
+    char *home = getenv("HOME");
+    if (strcmp(cmd[0], "cd\0") == 0) {
+        if (cmd[1] == NULL || (strcmp(cmd[1], "~\0") == 0)) {
+            chdir(home);
+        } else {
+            chdir(cmd[1]);
+        }
+        return 1;
+    }
+    return 0;
+}
+int pipe_conv(char ***cmd_arr, int cmd_num, pid_t **pids_in_bg, int *bg_size) {
+    int next_fd[2] = {0, 1}, prev_fd[2] = {0, 1};
+    int pos = -1, bg_flag = 0;
     pid_t pid;
     for (int i = 0; i < cmd_num; i++) {
+        if (change_dir(cmd_arr[i]) == 1) {
+            continue;
+        }
         if (i != (cmd_num - 1)) {
             pipe(next_fd);
         }
-        if ((pid = fork()) == 0) {
+        pid = fork();
+        bg_flag = 0;
+        pos = word_search(cmd_arr[i], "&\0");
+        if (pos != -1) {
+            *(pids_in_bg) = add_pid(*(pids_in_bg), pid, bg_size);
+            bg_flag = 1;
+            cmd_arr[i][pos] = NULL;
+        }
+        if (pid == 0) {
             if (i != 0) {
                 dup2(prev_fd[0], 0);
                 close(prev_fd[0]);
@@ -160,13 +199,63 @@ int main_cmd_exec(char **cmd) {
                 prev_fd[0] = next_fd[0];
                 prev_fd[1] = next_fd[1];
             }
-            wait(NULL);
+            if (bg_flag == 0)
+                wait(NULL);
         }
     }
     if (cmd_num > 1) {
         close(prev_fd[0]);
         close(prev_fd[1]);
     }
+    return 0;
+}
+int conj_conv(char ***cmd_arr, int cmd_num, pid_t **pids_in_bg, int *bg_size) {
+    int pos = -1, bg_flag;
+    int wstatus;
+    pid_t pid;
+    for (int i = 0; i < cmd_num; i++) {
+        if (change_dir(cmd_arr[i]) == 1) {
+                continue;
+        }
+        pid = fork();
+        bg_flag = 0;
+        pos = word_search(cmd_arr[i], "&\0");
+        if (pos != -1) {
+            *(pids_in_bg) = add_pid(*(pids_in_bg), pid, bg_size);
+            bg_flag = 1;
+            cmd_arr[i][pos] = NULL;
+        }
+        if (pid == 0) {
+            execute(cmd_arr[i]);
+            return 1;
+        }
+        if (bg_flag == 0) {
+            wait(&wstatus);
+        }
+        if (WEXITSTATUS(wstatus) != 0)
+            break;
+    }
+    return 0;
+}
+int main_cmd_exec(char **cmd, pid_t **pids_in_bg, int *bg_size) {
+    int cmd_num = 0, conv_type = 0;  // conv_type = 0 <=> && conv, else | conv
+    int res = 0;
+    char ***cmd_arr = cmd_cutter(cmd, &cmd_num, "&&\0");
+    if (cmd_num == 1) {
+        for (int i = 0; i < cmd_num; i++) {
+            free(cmd_arr[i]);
+        }
+        free(cmd_arr);
+        cmd_arr = cmd_cutter(cmd, &cmd_num, "|\0");
+        conv_type = 1;
+    }
+    if (conv_type == 1) {
+        res = pipe_conv(cmd_arr, cmd_num, pids_in_bg, bg_size);
+    } else {
+        res = conj_conv(cmd_arr, cmd_num, pids_in_bg, bg_size);
+    }
+    if (res == 1)
+        return 1;
     for (int i = 0; i < cmd_num; i++) {
         free(cmd_arr[i]);
     }
@@ -176,10 +265,13 @@ int main_cmd_exec(char **cmd) {
 int main() {
     char **list = NULL;
     char STP_WRD[] = "quit";
-    int n = 0;
+    int n = 0, bg_size = 0;
+    pid_t *pids_in_bg = NULL;
     list = get_list();
     while (strcmp(list[0], STP_WRD)) {
-        n = main_cmd_exec(list);
+        if (strcmp(list[0], "\0") != 0) {
+            n = main_cmd_exec(list, &(pids_in_bg), &bg_size);
+        }
         free_list(list);
         list = get_list();
         if (n == 1) {
@@ -187,5 +279,8 @@ int main() {
         }
     }
     free_list(list);
+    for (int i = 0; i < bg_size; i++) {
+        waitpid(pids_in_bg[i], NULL, 0);
+    }
     return 0;
 }
