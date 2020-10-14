@@ -11,9 +11,29 @@ Aviable:
 6. Execution of complicated conveyer commands using lex "&&"
 ## How to compile and run <a name="paragraph2"></a>
 1. Download
-2. run "make all"
-3. run "./bin/main"
-4. entertain yourself
-5. ???
-6. enter "quit" to quit
+```
+git clone https://github.com/DaurKas/shell
+```
+2. Compile
+```
+make all
+```
+3. Execute 
+```
+./bin/main
+```
+4. Entertain yourself, for example:
+```
+ls -l
+pwd
+sl
+```
+6. Finally 
+```
+quit
+```
+or
+```
+exit
+```
 * NOTE: You have to have cpplint installed in order to make programm
