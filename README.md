@@ -25,7 +25,11 @@ make all
 4. Entertain yourself, for example:
 ```
 ls -l
-pwd
+pwd > out.txt
+ls | grep .txt | sort
+evince &
+cd ~
+cd dir1 && ls
 sl
 ```
 6. Finally 
