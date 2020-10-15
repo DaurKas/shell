@@ -5,6 +5,16 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <signal.h>
+enum CONV_TYPE {
+    PIPE_CONV,
+    CONJ_CONV
+};
+void handler(int signo) {
+    kill(0, SIGINT);
+    printf("SIGINT received");
+    exit(1);
+}
 int strcmp(char *str1, char *str2) {  //  0 - eq, 1 - s1 < s2, 2 - s1 > s2
     int i = -1;
     do {
@@ -104,52 +114,38 @@ int word_search(char **cmd, char* word) {
     }
     return -1;
 }
-int iodetector(char **cmd, int *ioflag, int *ind) {
-//  ioflag = 0 <=> in from file, = 1 <=> out in file, = 2 <=> no redirect
-    int fd = 0, flag = 2, i = 0;
-    for (i = 0; cmd[i] != NULL; i++) {
-        if (cmd[i][0] == '>') {
-            if (cmd[i + 1] != NULL) {
-                printf("%s ", cmd[i + 1]);
-                fd = open(cmd[i + 1], O_WRONLY | O_CREAT | O_TRUNC,
-                                  S_IRUSR | S_IWUSR);
-                flag = 1;
-                break;
-            }
-        }
-        if (cmd[i][0] == '<') {
-            if (cmd[i + 1] != NULL) {
-                fd = open(cmd[i + 1], O_RDONLY | O_CREAT | O_TRUNC,
-                                  S_IRUSR | S_IWUSR);
-                flag = 0;
-                break;
-            }
-        }
+void io_detector(char **cmd) {
+    int in_pos = -1, out_pos = -1, in_fd = 0, out_fd = 1;
+    in_pos = word_search(cmd, "<");
+    out_pos = word_search(cmd, ">");
+    if (out_pos != -1) {
+        out_fd = open(cmd[out_pos + 1], O_WRONLY | O_CREAT | O_TRUNC,
+                                S_IRUSR | S_IWUSR);
+        cmd[out_pos] = NULL;
+        dup2(out_fd, 1);
+        close(out_fd);
     }
-    *ind = i;
-    *ioflag = flag;
-    return fd;
+    if (in_pos != -1) {
+        in_fd = open(cmd[in_pos + 1], O_RDONLY,
+                                S_IRUSR | S_IWUSR);
+        cmd[in_pos] = NULL;
+        dup2(in_fd, 0);
+        close(in_fd);
+    }
+    return;
 }
 int execute(char **cmd) {
-    int fd = 0, ioflag = 2, ind = 0;
-    fd = iodetector(cmd, &ioflag, &ind);
-    if (ioflag != 2) {
-        cmd[ind] = NULL;
-        dup2(fd, ioflag);
-        close(fd);
-    }
+    io_detector(cmd);
     if (execvp(cmd[0], cmd) < 0) {
-        perror("exec failed\n");
-        close(fd);
-        return 1;
+        perror("exec failed");
+        return -1;
     }
-    close(fd);
     return 0;
 }
 int change_dir(char **cmd) {
     char *home = getenv("HOME");
-    if (strcmp(cmd[0], "cd\0") == 0) {
-        if (cmd[1] == NULL || (strcmp(cmd[1], "~\0") == 0)) {
+    if (strcmp(cmd[0], "cd") == 0) {
+        if (cmd[1] == NULL || (strcmp(cmd[1], "~") == 0)) {
             chdir(home);
         } else {
             chdir(cmd[1]);
@@ -171,7 +167,7 @@ int pipe_conv(char ***cmd_arr, int cmd_num, pid_t **pids_in_bg, int *bg_size) {
         }
         pid = fork();
         bg_flag = 0;
-        pos = word_search(cmd_arr[i], "&\0");
+        pos = word_search(cmd_arr[i], "&");
         if (pos != -1) {
             *(pids_in_bg) = add_pid(*(pids_in_bg), pid, bg_size);
             bg_flag = 1;
@@ -188,7 +184,8 @@ int pipe_conv(char ***cmd_arr, int cmd_num, pid_t **pids_in_bg, int *bg_size) {
                 close(next_fd[0]);
                 close(next_fd[1]);
             }
-            execute(cmd_arr[i]);
+            if (execute(cmd_arr[i]) == -1)
+                return -1;
             return 1;
         } else if (pid > 0) {
             if (i != 0) {
@@ -226,7 +223,8 @@ int conj_conv(char ***cmd_arr, int cmd_num, pid_t **pids_in_bg, int *bg_size) {
             cmd_arr[i][pos] = NULL;
         }
         if (pid == 0) {
-            execute(cmd_arr[i]);
+            if (execute(cmd_arr[i]) == -1)
+                return -1;
             return 1;
         }
         if (bg_flag == 0) {
@@ -238,7 +236,7 @@ int conj_conv(char ***cmd_arr, int cmd_num, pid_t **pids_in_bg, int *bg_size) {
     return 0;
 }
 int main_cmd_exec(char **cmd, pid_t **pids_in_bg, int *bg_size) {
-    int cmd_num = 0, conv_type = 0;  // conv_type = 0 <=> && conv, else | conv
+    int cmd_num = 0, conv_type = CONJ_CONV;
     int res = 0;
     char ***cmd_arr = cmd_cutter(cmd, &cmd_num, "&&\0");
     if (cmd_num == 1) {
@@ -247,32 +245,35 @@ int main_cmd_exec(char **cmd, pid_t **pids_in_bg, int *bg_size) {
         }
         free(cmd_arr);
         cmd_arr = cmd_cutter(cmd, &cmd_num, "|\0");
-        conv_type = 1;
+        conv_type = PIPE_CONV;
     }
-    if (conv_type == 1) {
+    if (conv_type == PIPE_CONV) {
         res = pipe_conv(cmd_arr, cmd_num, pids_in_bg, bg_size);
     } else {
         res = conj_conv(cmd_arr, cmd_num, pids_in_bg, bg_size);
     }
-    if (res == 1)
-        return 1;
     for (int i = 0; i < cmd_num; i++) {
         free(cmd_arr[i]);
     }
     free(cmd_arr);
-    return 0;
+    return res;
 }
-int main() {
+int is_exit(char *cmd) {
+    return (strcmp(cmd, "quit") && strcmp(cmd, "exit"));
+}
+int inf_loop() {
     char **list = NULL;
-    char STP_WRD[] = "quit";
     int n = 0, bg_size = 0;
     pid_t *pids_in_bg = NULL;
     list = get_list();
-    while (strcmp(list[0], STP_WRD)) {
+    while (is_exit(list[0])) {
         if (strcmp(list[0], "\0") != 0) {
             n = main_cmd_exec(list, &(pids_in_bg), &bg_size);
         }
         free_list(list);
+        if (n == -1) {
+            return 1;
+        }
         list = get_list();
         if (n == 1) {
             return 0;
@@ -283,4 +284,9 @@ int main() {
         waitpid(pids_in_bg[i], NULL, 0);
     }
     return 0;
+}
+int main() {
+    signal(SIGINT, handler);
+    int result = inf_loop();
+    return result;
 }
