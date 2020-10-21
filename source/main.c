@@ -6,15 +6,18 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <signal.h>
+
 enum CONV_TYPE {
     PIPE_CONV,
     CONJ_CONV
 };
+
 void handler(int signo) {
     kill(0, SIGINT);
     printf("SIGINT received");
     exit(1);
 }
+
 int strcmp(char *str1, char *str2) {  //  0 - eq, 1 - s1 < s2, 2 - s1 > s2
     int i = -1;
     do {
@@ -26,12 +29,14 @@ int strcmp(char *str1, char *str2) {  //  0 - eq, 1 - s1 < s2, 2 - s1 > s2
     } while (str1[i] && str2[i]);
     return 0;
 }
+
 pid_t *add_pid(pid_t *pids, pid_t pid, int *bg_size) {
     pids = realloc(pids, (*bg_size + 1) * sizeof(pid_t));
     pids[*bg_size] = pid;
     (*bg_size)++;
     return pids;
 }
+
 char *get_word(char *last_ch) {
     char ch, *word = NULL;
     ch = getchar();
@@ -48,6 +53,7 @@ char *get_word(char *last_ch) {
     word[len] = '\0';
     return word;
 }
+
 char **get_list() {
     char **list = NULL, last_ch;
     int count = 1;
@@ -64,6 +70,7 @@ char **get_list() {
     list[count] = NULL;
     return list;
 }
+
 void free_list(char **list) {
     int i;
     if (list == NULL)
@@ -75,6 +82,7 @@ void free_list(char **list) {
     free(list);
     return;
 }
+
 char ***cmd_cutter(char **cmd, int *number, char *sep_word) {
     int cnt = 1, w_cnt = 0, newsize = 0;
     char ***cmd_arr = malloc(sizeof(char**));
@@ -105,6 +113,7 @@ char ***cmd_cutter(char **cmd, int *number, char *sep_word) {
     *number = cnt;
     return cmd_arr;
 }
+
 int word_search(char **cmd, char* word) {
     int pos = 0;
     for (pos = 0; cmd[pos] != NULL; pos++) {
@@ -114,6 +123,7 @@ int word_search(char **cmd, char* word) {
     }
     return -1;
 }
+
 void io_detector(char **cmd) {
     int in_pos = -1, out_pos = -1, in_fd = 0, out_fd = 1;
     in_pos = word_search(cmd, "<");
@@ -134,6 +144,7 @@ void io_detector(char **cmd) {
     }
     return;
 }
+
 int execute(char **cmd) {
     io_detector(cmd);
     if (execvp(cmd[0], cmd) < 0) {
@@ -142,6 +153,7 @@ int execute(char **cmd) {
     }
     return 0;
 }
+
 int change_dir(char **cmd) {
     char *home = getenv("HOME");
     if (strcmp(cmd[0], "cd") == 0) {
@@ -154,6 +166,7 @@ int change_dir(char **cmd) {
     }
     return 0;
 }
+
 int pipe_conv(char ***cmd_arr, int cmd_num, pid_t **pids_in_bg, int *bg_size) {
     int next_fd[2] = {0, 1}, prev_fd[2] = {0, 1};
     int pos = -1, bg_flag = 0;
@@ -206,6 +219,7 @@ int pipe_conv(char ***cmd_arr, int cmd_num, pid_t **pids_in_bg, int *bg_size) {
     }
     return 0;
 }
+
 int conj_conv(char ***cmd_arr, int cmd_num, pid_t **pids_in_bg, int *bg_size) {
     int pos = -1, bg_flag;
     int wstatus;
@@ -216,7 +230,7 @@ int conj_conv(char ***cmd_arr, int cmd_num, pid_t **pids_in_bg, int *bg_size) {
         }
         pid = fork();
         bg_flag = 0;
-        pos = word_search(cmd_arr[i], "&\0");
+        pos = word_search(cmd_arr[i], "&");
         if (pos != -1) {
             *(pids_in_bg) = add_pid(*(pids_in_bg), pid, bg_size);
             bg_flag = 1;
@@ -235,16 +249,17 @@ int conj_conv(char ***cmd_arr, int cmd_num, pid_t **pids_in_bg, int *bg_size) {
     }
     return 0;
 }
+
 int main_cmd_exec(char **cmd, pid_t **pids_in_bg, int *bg_size) {
     int cmd_num = 0, conv_type = CONJ_CONV;
     int res = 0;
-    char ***cmd_arr = cmd_cutter(cmd, &cmd_num, "&&\0");
+    char ***cmd_arr = cmd_cutter(cmd, &cmd_num, "&&");
     if (cmd_num == 1) {
         for (int i = 0; i < cmd_num; i++) {
             free(cmd_arr[i]);
         }
         free(cmd_arr);
-        cmd_arr = cmd_cutter(cmd, &cmd_num, "|\0");
+        cmd_arr = cmd_cutter(cmd, &cmd_num, "|");
         conv_type = PIPE_CONV;
     }
     if (conv_type == PIPE_CONV) {
@@ -258,9 +273,11 @@ int main_cmd_exec(char **cmd, pid_t **pids_in_bg, int *bg_size) {
     free(cmd_arr);
     return res;
 }
+
 int is_exit(char *cmd) {
     return (strcmp(cmd, "quit") && strcmp(cmd, "exit"));
 }
+
 int inf_loop() {
     char **list = NULL;
     int n = 0, bg_size = 0;
@@ -285,6 +302,7 @@ int inf_loop() {
     }
     return 0;
 }
+
 int main() {
     signal(SIGINT, handler);
     int result = inf_loop();
